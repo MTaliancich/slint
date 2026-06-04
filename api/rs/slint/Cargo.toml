@@ -198,12 +198,6 @@ backend-android-activity-06 = [
   "i-slint-backend-selector/backend-android-activity",
 ]
 
-## **Deprecated** Use previous version of android-activity. This is mutually exclusive with `backend-android-activity-06`.
-backend-android-activity-05 = [
-  "i-slint-backend-android-activity/native-activity",
-  "i-slint-backend-android-activity/aa-05",
-]
-
 ## Enable support for [WGPU](http://wgpu.rs) based rendering and expose WGPU based APIs based on WGPU version 28.x.
 ##
 ## APIs guarded with this feature are *NOT* subject to the usual Slint API stability guarantees, because WGPU releases new major
@@ -214,7 +208,7 @@ backend-android-activity-05 = [
 ## in your `Cargo.toml` when enabling this feature:
 ##
 ## ```toml
-## slint = { version = "~1.17", features = ["unstable-wgpu-28"] }
+## slint = { version = "~1.18", features = ["unstable-wgpu-28"] }
 ## ```
 unstable-wgpu-28 = [
   "i-slint-core/unstable-wgpu-28",
@@ -233,7 +227,7 @@ unstable-wgpu-28 = [
 ## in your `Cargo.toml` when enabling this feature:
 ##
 ## ```toml
-## slint = { version = "~1.17", features = ["unstable-wgpu-29"] }
+## slint = { version = "~1.18", features = ["unstable-wgpu-29"] }
 ## ```
 unstable-wgpu-29 = [
   "i-slint-core/unstable-wgpu-29",
@@ -250,7 +244,7 @@ unstable-wgpu-29 = [
 ## in your `Cargo.toml` when enabling this feature:
 ##
 ## ```toml
-## slint = { version = "~1.17", features = ["unstable-winit-030"] }
+## slint = { version = "~1.18", features = ["unstable-winit-030"] }
 ## ```
 unstable-winit-030 = ["backend-winit", "dep:i-slint-backend-winit", "i-slint-backend-selector/unstable-winit-030"]
 
@@ -264,7 +258,7 @@ unstable-winit-030 = ["backend-winit", "dep:i-slint-backend-winit", "i-slint-bac
 ## in your `Cargo.toml` when enabling this feature:
 ##
 ## ```toml
-## slint = { version = "~1.17", features = ["unstable-libinput-09"] }
+## slint = { version = "~1.18", features = ["unstable-libinput-09"] }
 ## ```
 unstable-libinput-09 = ["i-slint-backend-selector/unstable-libinput-09"]
 
@@ -277,7 +271,7 @@ unstable-libinput-09 = ["i-slint-backend-selector/unstable-libinput-09"]
 ## in your `Cargo.toml` when enabling this feature:
 ##
 ## ```toml
-## slint = { version = "~1.17", features = ["unstable-fontique-010"] }
+## slint = { version = "~1.18", features = ["unstable-fontique-010"] }
 ## ```
 unstable-fontique-010 = ["i-slint-common/shared-fontique"]
 

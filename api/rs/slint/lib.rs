@@ -508,7 +508,7 @@ pub mod android;
 /// Helper type that helps checking that the generated code is generated for the right version
 #[doc(hidden)]
 #[allow(non_camel_case_types)]
-pub struct VersionCheck_1_17_0;
+pub struct VersionCheck_1_18_0;
 
 #[cfg(doctest)]
 mod compile_fail_tests;
@@ -554,7 +554,7 @@ pub mod wgpu_29 {
     //!
     //! `Cargo.toml`:
     //! ```toml
-    //! slint = { version = "~1.17", features = ["unstable-wgpu-29"] }
+    //! slint = { version = "~1.18", features = ["unstable-wgpu-29"] }
     //! ```
     //!
     //! `main.rs`:
@@ -641,7 +641,7 @@ pub mod winit_030 {
     //!
     //! `Cargo.toml`:
     //! ```toml
-    //! slint = { version = "~1.17", features = ["unstable-winit-030"] }
+    //! slint = { version = "~1.18", features = ["unstable-winit-030"] }
     //! ```
     //!
     //! `main.rs`:
@@ -722,7 +722,7 @@ pub mod fontique_010 {
     ///
     /// `Cargo.toml`:
     /// ```toml
-    /// slint = { version = "~1.17", features = ["unstable-fontique-010"] }
+    /// slint = { version = "~1.18", features = ["unstable-fontique-010"] }
     /// ```
     ///
     /// `main.rs`:

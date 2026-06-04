@@ -3,7 +3,7 @@
 
 [project]
 name = "system_tray"
-version = "1.17.0"
+version = "1.18.0"
 description = "Slint SystemTrayIcon Python Example"
 requires-python = ">=3.12"
 dependencies = ["slint"]
