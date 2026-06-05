@@ -3,14 +3,16 @@
 
 use std::{net::SocketAddr, rc::Rc};
 
-use i_slint_compiler::diagnostics::BuildDiagnostics;
+use i_slint_compiler::diagnostics::Spanned;
 use i_slint_core::InternalToken;
 use i_slint_core::SharedString;
 use i_slint_live_preview::protocol::{PreviewComponent, PreviewToLspMessage, lsp_types};
 use i_slint_live_preview::remote::{Connection, ConnectionMessage, init_compiler};
-use slint_interpreter::ComponentHandle as _;
+use slint::ComponentHandle as _;
 
-const MAIN_SLINT: &str = include_str!("remote/main.slint");
+slint::slint! {
+    export { EmptyWindow } from "remote/main.slint";
+}
 
 pub fn run(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Result<()> {
     slint_interpreter::spawn_local(async_compat::Compat::new(async move {
@@ -34,24 +36,9 @@ async fn run_async(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Re
     );
 
     let mut compiler = init_compiler(Rc::downgrade(&connection));
-    let base_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_owned()))
-        .unwrap_or_else(std::env::temp_dir);
-    let compilation_result = compiler.build_from_source(MAIN_SLINT.to_owned(), base_path).await;
-    if compilation_result.has_errors() {
-        let mut build_diagnostics = BuildDiagnostics::default();
-        for d in compilation_result.diagnostics() {
-            build_diagnostics.push_compiler_error(d);
-        }
-        let diagnostics = build_diagnostics.diagnostics_as_string();
-        tracing::error!("Failed compiling main.slint: {diagnostics}");
-        anyhow::bail!("Failed compiling main.slint: {diagnostics}");
-    }
-    let main_ui = compilation_result.component("EmptyWindow").unwrap();
-    let window = main_ui.create().unwrap();
 
-    let mut inner_window = window.clone_strong();
+    let mut placeholder = EmptyWindow::new()?;
+
     #[cfg(not(target_vendor = "apple"))]
     let mdns = enable_mdns.then(mdns_sd::ServiceDaemon::new).transpose()?;
 
@@ -116,23 +103,14 @@ async fn run_async(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Re
             }
         })
         .collect();
+    let address = local_ip_str.join("\n");
 
-    if let Err(err) =
-        window.set_property("address", SharedString::from(local_ip_str.join("\n")).into())
-    {
-        tracing::error!("Failed setting property: {err}");
-    }
-
-    if let Err(err) = window.set_property("name", SharedString::from(device_name.clone()).into()) {
-        tracing::error!("Failed setting property: {err}");
-    }
-
-    println!("{}", local_ip_str.join("\n"));
-
-    window.show().inspect_err(|err| tracing::error!("window show: {err}"))?;
+    placeholder.set_address(SharedString::from(address.as_str()));
+    placeholder.set_name(SharedString::from(device_name.as_str()));
+    placeholder.show()?;
 
     let mut last_connection = None;
-    let mut instance = inner_window.clone_strong();
+    let mut user_instance: Option<slint_interpreter::ComponentInstance> = None;
     let mut current_preview: Option<PreviewComponent> = None;
     while let Some(msg) = message_receiver.recv().await {
         match msg {
@@ -142,41 +120,34 @@ async fn run_async(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Re
                     config.enable_experimental;
             }
             ConnectionMessage::ShowPreview { preview_component } => {
-                if let Some(new_instance) = build_and_show(
+                build_and_show(
                     &compiler,
                     &preview_component,
-                    &inner_window,
-                    &instance,
+                    &mut placeholder,
+                    &mut user_instance,
                     &connection,
+                    &address,
+                    &device_name,
                 )
-                .await?
-                {
-                    instance = new_instance;
-                }
+                .await?;
                 current_preview = Some(preview_component);
             }
             ConnectionMessage::ContentsChanged => {
                 let Some(preview_component) = current_preview.clone() else { continue };
-                if let Some(new_instance) = build_and_show(
+                build_and_show(
                     &compiler,
                     &preview_component,
-                    &inner_window,
-                    &instance,
+                    &mut placeholder,
+                    &mut user_instance,
                     &connection,
+                    &address,
+                    &device_name,
                 )
-                .await?
-                {
-                    instance = new_instance;
-                }
+                .await?;
             }
             ConnectionMessage::HighlightFromEditor { .. } => {}
             ConnectionMessage::Connected { remote_addr } => {
-                if let Err(err) = inner_window.set_property(
-                    "message",
-                    SharedString::from(format!("Connected to {remote_addr}")).into(),
-                ) {
-                    tracing::error!("Failed setting property: {err}");
-                }
+                placeholder.set_message(SharedString::from(format!("Connected to {remote_addr}")));
                 last_connection = Some(remote_addr);
             }
             ConnectionMessage::Disconnected { remote_addr } => {
@@ -184,21 +155,13 @@ async fn run_async(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Re
                     last_connection = None;
                     current_preview = None;
                     connection.set_dependencies(Vec::new());
-                    inner_window = main_ui
-                        .create_with_existing_window(instance.window())
-                        .unwrap_or_else(|_| main_ui.create().unwrap());
-                    if let Err(err) = inner_window
-                        .set_property("address", SharedString::from(local_ip_str.join("\n")).into())
-                    {
-                        tracing::error!("Failed setting property: {err}");
-                    }
-                    if let Err(err) = inner_window
-                        .set_property("name", SharedString::from(device_name.clone()).into())
-                    {
-                        tracing::error!("Failed setting property: {err}");
-                    }
-                    inner_window.show().unwrap();
-                    instance = inner_window.clone_strong();
+                    swap_to_placeholder(
+                        &mut placeholder,
+                        &mut user_instance,
+                        &address,
+                        &device_name,
+                        "",
+                    )?;
                 }
             }
         }
@@ -212,34 +175,34 @@ async fn run_async(address: Option<SocketAddr>, enable_mdns: bool) -> anyhow::Re
     Ok(())
 }
 
-/// Compile `preview_component` from the connection's file cache and replace the visible
-/// instance with it. Returns `Ok(Some(new))` after a successful build, `Ok(None)` if the
-/// build failed or the component wasn't found, and `Err` only when the platform can no
-/// longer host a Slint window — the caller should propagate it and exit, since retrying
-/// on every keystroke would only repeat the underlying failure.
+/// Returns `Err` only on unrecoverable platform failure; compile errors and missing
+/// components reinstall the placeholder and return `Ok(())`.
 async fn build_and_show(
     compiler: &slint_interpreter::Compiler,
     preview_component: &PreviewComponent,
-    inner_window: &slint_interpreter::ComponentInstance,
-    instance: &slint_interpreter::ComponentInstance,
-    connection: &Connection,
-) -> anyhow::Result<Option<slint_interpreter::ComponentInstance>> {
+    placeholder: &mut EmptyWindow,
+    user_instance: &mut Option<slint_interpreter::ComponentInstance>,
+    connection: &Rc<Connection>,
+    address: &str,
+    name: &str,
+) -> anyhow::Result<()> {
+    tracing::debug!("build_and_show");
+
     let Ok(path) = preview_component.url.to_file_path() else {
         tracing::error!("Not a file URL: {}", preview_component.url);
-        return Ok(None);
+        return Ok(());
     };
     let file = match connection.request_file(preview_component.url.clone()).await {
         Ok(file) => file,
         Err(err) => {
             tracing::error!("Failed fetching {}: {err}", preview_component.url);
-            return Ok(None);
+            return Ok(());
         }
     };
     let compilation_result = compiler
         .build_from_source(String::from_utf8_lossy(&file.contents).into_owned(), path)
         .await;
-    // Watch paths come from the type loader and are populated even on errors, so the
-    // connection keeps reacting to edits in the right files while the user types a fix.
+    // Set even on errors so edits to imported files still trigger a rebuild.
     let watch_urls: Vec<lsp_types::Url> = compilation_result
         .watch_paths(InternalToken)
         .iter()
@@ -255,10 +218,8 @@ async fn build_and_show(
             .map(|d| d.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        if let Err(err) = inner_window.set_property("message", SharedString::from(message).into()) {
-            tracing::error!("Failed setting property: {err}");
-        }
-        return Ok(None);
+        swap_to_placeholder(placeholder, user_instance, address, name, &message)?;
+        return Ok(());
     }
 
     let Some(component) = preview_component
@@ -267,33 +228,63 @@ async fn build_and_show(
         .or_else(|| compilation_result.component_names().next())
         .and_then(|name| compilation_result.component(name))
     else {
-        // Compilation produced no errors but the requested component is missing.
-        // Don't publish a Diagnostics message: that would clobber whatever the LSP
-        // (or a previous compile) was showing in the editor for this URI, while
-        // the only signal we have to surface is local to the viewer window.
-        if let Err(err) =
-            inner_window.set_property("message", SharedString::from("Component not found").into())
-        {
-            tracing::error!("Failed setting property: {err}");
-        }
+        // No compile errors but no component — skip send_diagnostics so we don't clobber
+        // unrelated LSP diagnostics for this URI.
         tracing::error!("Component not found");
-        return Ok(None);
+        swap_to_placeholder(placeholder, user_instance, address, name, "Component not found")?;
+        return Ok(());
     };
 
-    // Clean build: publish the (possibly empty) diagnostic list so the editor
-    // clears any errors we surfaced from the previous build.
+    // Send the (possibly empty) list so the editor clears stale errors.
     send_diagnostics(&compilation_result, &preview_component.url, connection);
-    if let Err(err) = inner_window.set_property("message", SharedString::new().into()) {
-        tracing::error!("Failed setting property: {err}");
-    }
 
+    let connection = Rc::downgrade(connection);
+    component.set_debug_handler(
+        move |location, message| {
+            let Some(connection) = connection.upgrade() else {
+                return;
+            };
+            let location = location.and_then(|location| {
+                location.source_file().map(|file| {
+                    let (line, column) = file.line_column(
+                        location.span.offset,
+                        i_slint_compiler::diagnostics::ByteFormat::Utf8,
+                    );
+                    (file.path().to_owned(), line, column)
+                })
+            });
+            connection
+                .send(PreviewToLspMessage::DebugMessage { location, message: message.into() })
+                .ok();
+        },
+        i_slint_core::InternalToken,
+    );
     let new_instance = component
-        .create_with_existing_window(instance.window())
+        .create_with_existing_window(placeholder.window())
         .map_err(|err| anyhow::anyhow!("Cannot create component instance: {err}"))?;
 
     new_instance.show().map_err(|err| anyhow::anyhow!("Cannot show component: {err}"))?;
+    *user_instance = Some(new_instance);
+    Ok(())
+}
 
-    Ok(Some(new_instance))
+/// Reinstall a fresh placeholder onto the existing window and drop the user instance.
+fn swap_to_placeholder(
+    placeholder: &mut EmptyWindow,
+    user_instance: &mut Option<slint_interpreter::ComponentInstance>,
+    address: &str,
+    name: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    let fresh = EmptyWindow::new_with_existing_window(placeholder.window())
+        .map_err(|err| anyhow::anyhow!("Cannot create placeholder: {err}"))?;
+    fresh.set_address(SharedString::from(address));
+    fresh.set_name(SharedString::from(name));
+    fresh.set_message(SharedString::from(message));
+    fresh.show().map_err(|err| anyhow::anyhow!("Cannot show placeholder: {err}"))?;
+    *placeholder = fresh;
+    *user_instance = None;
+    Ok(())
 }
 
 /// Platform-specific override for the friendly device name. Returns `None` on platforms
