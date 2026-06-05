@@ -55,6 +55,8 @@ impl SharedVulkanContext {
             khr_win32_surface: true,
             khr_get_surface_capabilities2: true,
             khr_get_physical_device_properties2: true,
+            #[cfg(target_os = "android")]
+            khr_android_surface: true,
             ..InstanceExtensions::empty()
         }
         .intersection(library.supported_extensions());
@@ -122,7 +124,7 @@ impl VulkanSurface {
                 .physical_device()
                 .surface_capabilities(&surface, Default::default())
                 .map_err(|vke| format!("Error matching Vulkan surface capabilities: {vke}"))?;
-            let image_format = vulkano::format::Format::B8G8R8A8_UNORM;
+            let image_format = vulkano::format::Format::R8G8B8A8_UNORM;
 
             Swapchain::new(
                 device.clone(),
@@ -449,6 +451,10 @@ fn create_surface(
 ) -> Result<Arc<Surface>, vulkano::Validated<vulkano::VulkanError>> {
     #[cfg_attr(slint_nightly_test, allow(non_exhaustive_omitted_patterns))]
     match (window_handle.as_raw(), display_handle.as_raw()) {
+        #[cfg(target_os = "android")]
+        (raw_window_handle::RawWindowHandle::AndroidNdk(handle), _) => unsafe {
+            Surface::from_android(instance.clone(), handle.a_native_window.as_ptr(), None)
+        }
         #[cfg(target_vendor = "apple")]
         (raw_window_handle::RawWindowHandle::AppKit(handle), _) => unsafe {
             let layer = raw_window_metal::Layer::from_ns_view(handle.ns_view);
